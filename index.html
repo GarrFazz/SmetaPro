@@ -100,7 +100,72 @@ function removeCatalogItem(id){if(!confirm('Удалить позицию?'))ret
 function renderCatalog(){if(!$('catalogList'))return;let q=($('catSearch').value||'').toLowerCase(),list=catalog.filter(x=>(x.name+' '+x.type).toLowerCase().includes(q));$('catalogCount').textContent=catalog.length;$('catalogList').innerHTML='';list.forEach(x=>{let el=document.createElement('div');el.className='saved-item';let info=document.createElement('div'),b=document.createElement('strong'),s=document.createElement('small');b.textContent=x.name;s.textContent=x.type+' · '+x.unit+' · '+money(x.price);info.append(b,s);let a=document.createElement('div'),add=document.createElement('button'),del=document.createElement('button');add.textContent='＋ В смету';add.onclick=()=>addCatalogToEstimate(x.id);del.textContent='×';del.onclick=()=>removeCatalogItem(x.id);a.append(add,del);el.append(info,a);$('catalogList').append(el)})}
 function saveBrand(){brand={name:$('orgName').value.trim(),phone:$('orgPhone').value.trim(),email:$('orgEmail').value.trim(),inn:$('orgInn').value.trim(),address:$('orgAddress').value.trim(),footer:$('orgFooter').value.trim()};safeStore(BRAND_KEY,brand);alert('Реквизиты сохранены')}
 function loadBrand(){[['orgName','name'],['orgPhone','phone'],['orgEmail','email'],['orgInn','inn'],['orgAddress','address'],['orgFooter','footer']].forEach(([id,k])=>$(id).value=brand[k]||'')}
-function printDocument(type){let d=formData();if(!d.items.length||!d.items.some(x=>x.name.trim()))return alert('Добавьте позиции');if(type==='invoice'&&!d.client.trim())return alert('Для счёта укажите заказчика');$('printDocType').textContent=type==='invoice'?'СЧЁТ НА ОПЛАТУ':'СМЕТА';$('printOrgDetails').innerHTML=[brand.name,brand.phone,brand.email,brand.inn?'ИНН '+brand.inn:'',brand.address].filter(Boolean).map(escapeHtml).join('<br>');let h=document.querySelector('#editor h3'),old=h.textContent;h.textContent=(type==='invoice'?'Счёт на оплату':'Смета')+' № '+d.id.slice(-6);document.title='SmetaPro — '+h.textContent;window.print();h.textContent=old;document.title='SmetaPro — рабочий кабинет'}
+function printDocument(type){
+  const d=formData();
+  const validItems=d.items.filter(x=>x.name.trim());
+  if(!validItems.length){alert('Добавьте хотя бы одну позицию с наименованием.');return}
+  if(type==='invoice'&&!d.client.trim()){alert('Для счёта укажите заказчика.');return}
+
+  // Открываем окно сразу по нажатию кнопки: так браузер не блокирует печать как всплывающее окно.
+  const printWindow=window.open('','_blank');
+  if(!printWindow){alert('Браузер заблокировал окно документа. Разрешите всплывающие окна для этого сайта и нажмите кнопку ещё раз.');return}
+
+  const esc=escapeHtml;
+  const orgLines=[brand.name,brand.phone,brand.email,brand.inn?'ИНН: '+brand.inn:'',brand.address].filter(Boolean);
+  const dateText=d.date?new Date(d.date+'T00:00:00').toLocaleDateString('ru-RU'):'—';
+  const title=type==='invoice'?'Счёт на оплату':'Смета';
+  const docNo=String(d.id).slice(-6);
+  const rowsHtml=validItems.map((item,i)=>{
+    const amount=item.qty*item.price;
+    return `<tr><td>${i+1}</td><td>${esc(item.name)}</td><td>${esc(item.unit||'—')}</td><td class="right">${Number(item.qty).toLocaleString('ru-RU')}</td><td class="right">${money(item.price)}</td><td class="right">${money(amount)}</td></tr>`;
+  }).join('');
+  const subtotal=validItems.reduce((s,x)=>s+x.qty*x.price,0);
+  const total=Math.max(0,subtotal-d.discount);
+  const clientBlock=d.client?`<div><b>Заказчик:</b> ${esc(d.client)}</div>`:'';
+  const phoneBlock=d.phone?`<div><b>Телефон:</b> ${esc(d.phone)}</div>`:'';
+  const addressBlock=d.address?`<div><b>Объект:</b> ${esc(d.address)}</div>`:'';
+  const noteBlock=d.notes?`<section class="notes"><b>Примечание:</b><br>${esc(d.notes).replace(/\n/g,'<br>')}</section>`:'';
+  const invoiceNote=type==='invoice'?'<p class="muted">Просим оплатить указанные работы и материалы.</p>':'';
+  const footer=brand.footer?`<div class="footer">${esc(brand.footer).replace(/\n/g,'<br>')}</div>`:'';
+
+  const docHtml=`<!doctype html><html lang="ru"><head><meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} № ${docNo}</title>
+  <style>
+    *{box-sizing:border-box}body{font:14px/1.45 Arial,sans-serif;color:#172033;margin:0;padding:28px}
+    .head{display:flex;align-items:flex-start;gap:14px;border-bottom:2px solid #2d5c9e;padding-bottom:16px;margin-bottom:22px}
+    .mark{width:46px;height:46px;display:grid;place-items:center;background:#2865d8;color:#fff;font-weight:800;font-size:17px;border-radius:9px;flex:none}
+    .brand{font-size:20px;font-weight:800}.tag{font-size:10px;color:#667085;margin-top:3px}
+    .org{margin-left:auto;text-align:right;font-size:11px;color:#475569;max-width:48%}
+    h1{font-size:23px;margin:0 0 5px}.meta{display:flex;justify-content:space-between;gap:20px;color:#475569;margin-bottom:20px}
+    .client{line-height:1.7;margin-bottom:18px}table{width:100%;border-collapse:collapse;margin:16px 0}
+    th,td{border:1px solid #d8e0eb;padding:9px 7px;text-align:left;vertical-align:top}
+    th{background:#eef3f9;font-size:11px;color:#475569}td{font-size:12px}.right{text-align:right;white-space:nowrap}
+    .totals{width:290px;margin:18px 0 0 auto}.sum{display:flex;justify-content:space-between;padding:5px 0;color:#475569}
+    .grand{border-top:2px solid #2d5c9e;margin-top:7px;padding-top:10px;font-size:17px;font-weight:800;color:#172033}
+    .notes{margin-top:22px;padding-top:12px;border-top:1px solid #d8e0eb;font-size:12px}
+    .muted{color:#667085}.footer{margin-top:32px;padding-top:12px;border-top:1px solid #d8e0eb;color:#667085;font-size:11px}
+    .sign{display:flex;justify-content:space-between;gap:30px;margin-top:48px;font-size:12px}.sign span{border-top:1px solid #8993a3;padding-top:7px;width:45%}
+    .toolbar{margin-bottom:18px}.toolbar button{padding:10px 16px;border:0;border-radius:7px;background:#2865d8;color:#fff;font-weight:700;cursor:pointer}
+    @page{size:A4;margin:14mm}
+    @media print{body{padding:0}.toolbar{display:none!important}thead{display:table-header-group}tr{break-inside:avoid} .notes,.footer{break-inside:avoid}}
+  </style></head><body>
+  <div class="toolbar"><button onclick="window.print()">Печать / Сохранить в PDF</button></div>
+  <header class="head"><div class="mark">SP</div><div><div class="brand">SmetaPro</div><div class="tag">СМЕТЫ · СТРОИТЕЛЬСТВО · КОНТРОЛЬ</div></div><div class="org">${orgLines.map(esc).join('<br>')}</div></header>
+  <h1>${title} № ${docNo}</h1>
+  <div class="meta"><span>Объект: <b>${esc(d.name)}</b></span><span>Дата: ${dateText}</span></div>
+  <div class="client">${clientBlock}${phoneBlock}${addressBlock}</div>
+  ${invoiceNote}
+  <table><thead><tr><th style="width:32px">№</th><th>Наименование</th><th>Ед.</th><th class="right">Кол-во</th><th class="right">Цена</th><th class="right">Сумма</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+  <div class="totals"><div class="sum"><span>Промежуточный итог</span><b>${money(subtotal)}</b></div><div class="sum"><span>Скидка</span><b>${money(d.discount)}</b></div><div class="sum grand"><span>Итого</span><b>${money(total)}</b></div></div>
+  ${noteBlock}${footer}
+  <div class="sign"><span>Исполнитель __________________</span><span>Заказчик __________________</span></div>
+  <script>window.addEventListener('load',()=>{setTimeout(()=>window.print(),350)});<\/script>
+  </body></html>`;
+
+  printWindow.document.open();
+  printWindow.document.write(docHtml);
+  printWindow.document.close();
+}
 
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('installBtn').classList.remove('hidden')});
